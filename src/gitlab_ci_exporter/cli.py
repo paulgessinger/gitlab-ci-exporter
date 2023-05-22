@@ -9,11 +9,11 @@ cli = typer.Typer()
 
 @cli.command()
 def serve(
-    host: str = typer.Option(...),
-    token: str = typer.Option(...),
-    project: str = typer.Option(...),
-    interval: int = 30,
-    port: int = 8000,
+    host: str = typer.Option(..., envvar="GLE_HOST"),
+    token: str = typer.Option(..., envvar="GLE_TOKEN"),
+    project: str = typer.Option(..., envvar="GLE_PROJECT"),
+    interval: int = typer.Option(30, envvar="GLE_INTERVAL"),
+    port: int = typer.Option(8000, envvar="PORT"),
 ):
 
     updater = Updater(host=host, token=token)
