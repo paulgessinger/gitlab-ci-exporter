@@ -53,7 +53,7 @@ class Updater:
         )
 
 
-        g = (j for _, j in zip(range(100), self._adapt(jobs)))
+        g = (j for _, j in zip(range(1000), self._adapt(jobs)))
         Job.insert_many(g).on_conflict_replace().execute()
 
         gitlab_ci_job_count.clear()
