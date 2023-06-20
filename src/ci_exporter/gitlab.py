@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 import tempfile
 import contextlib
@@ -5,27 +6,31 @@ from pathlib import Path
 
 import gitlab
 import peewee
-from prometheus_client import generate_latest, start_http_server, Gauge
+from prometheus_client import CollectorRegistry, generate_latest, start_http_server, Gauge
 from apscheduler.schedulers.blocking import BlockingScheduler
 import typer
 
 from .db import Job, database, prepare_database
 from .update import Updater
 
-gitlab_ci_job_count = Gauge(
-    name="gitlab_ci_job_count",
-    documentation="The total number of jobs running for various categories",
-    labelnames=["status", "job_name"],
-)
-
-gitlab_ci_job_latency = Gauge(
-    name="gitlab_ci_job_latency",
-    documentation="Time of most recent finished job spent in queue",
-)
 
 class GitlabUpdater(Updater):
     def __init__(self, host: str, token: str):
         self.gl = gitlab.Gitlab(url=host, private_token=token)
+        self.registry = CollectorRegistry()
+
+        self.job_count = Gauge(
+            name="gitlab_ci_job_count",
+            documentation="The total number of jobs running for various categories",
+            labelnames=["status", "job_name"],
+            registry=self.registry
+        )
+
+        self.job_latency = Gauge(
+            name="gitlab_ci_job_latency",
+            documentation="Time of most recent finished job spent in queue",
+            registry=self.registry
+        )
 
     def _adapt(self, jobs):
         for i, job in enumerate(jobs):
@@ -65,16 +70,16 @@ class GitlabUpdater(Updater):
         g = (j for _, j in zip(range(1000), self._adapt(jobs)))
         Job.insert_many(g).on_conflict_replace().execute()
 
-        gitlab_ci_job_count.clear()
+        self.job_count.clear()
         for job in Job.select(
             peewee.fn.COUNT().alias("count"), Job.name, Job.status
         ).group_by(Job.name, Job.status):
-            gitlab_ci_job_count.labels(status=job.status, job_name=job.name).inc(
+            self.job_count.labels(status=job.status, job_name=job.name).inc(
                 job.count
             )
 
         latest = Job.select().order_by(Job.finished_at.desc()).get()
-        gitlab_ci_job_latency.set(latest.queued_duration)
+        self.job_latency.set(latest.queued_duration)
 
 cli = typer.Typer()
 
@@ -89,14 +94,14 @@ def serve(
     with tempfile.NamedTemporaryFile() as t:
         prepare_database(Path(t.name))
         updater = GitlabUpdater(host=host, token=token)
-        start_http_server(port)
+        start_http_server(port, registry=updater.registry)
 
         scheduler = BlockingScheduler()
         scheduler.add_executor("threadpool")
 
         scheduler.add_job(
             updater.tick, "interval", seconds=interval, kwargs={"project": project}
-        )
+        ).modify(next_run_time=datetime.now())
 
         try:
             print("Starting scheduler")
