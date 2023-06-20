@@ -4,7 +4,7 @@ version = "0.1.0"
 description = ""
 authors = ["Paul Gessinger <hello@paulgessinger.com>"]
 packages = [
-    { include = "gitlab_ci_exporter", from = "src"  },
+    { include = "ci_exporter", from = "src"  },
 ]
 
 [tool.poetry.dependencies]
