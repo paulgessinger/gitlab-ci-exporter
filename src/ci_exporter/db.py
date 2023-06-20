@@ -4,14 +4,17 @@ import peewee
 
 database = peewee.SqliteDatabase(None)
 
+
 def prepare_database(dbfile: Path):
     database.init(dbfile)
     database.connect()
     database.create_tables([Job])
 
+
 class Model(peewee.Model):
     class Meta:
         database = database
+
 
 class Job(Model):
     id = peewee.IntegerField(primary_key=True, unique=True)
@@ -24,6 +27,3 @@ class Job(Model):
     name = peewee.CharField()
     ref = peewee.CharField()
     status = peewee.CharField()
-    failure_reason = peewee.CharField(null=True)
-
-

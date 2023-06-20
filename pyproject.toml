@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "gitlab-ci-exporter"
+name = "ci-exporter"
 version = "0.1.0"
 description = ""
 authors = ["Paul Gessinger <hello@paulgessinger.com>"]
@@ -18,7 +18,7 @@ APScheduler = "^3.10.1"
 peewee = "^3.16.2"
 
 [tool.poetry.scripts]
-gitlab-ci-exporter = 'gitlab_ci_exporter.cli:cli'
+ci-exporter = 'ci_exporter.cli:cli'
 
 [tool.poetry.dev-dependencies]
 
