@@ -1,11 +1,12 @@
 import abc
+from typing import List
 
 from prometheus_client import CollectorRegistry
 
+
 class Updater(abc.ABC):
     @abc.abstractmethod
-    def tick(self, project: str) -> None:
+    async def tick(self, projects: List[str]) -> None:
         raise NotImplemented()
-
 
     registry: CollectorRegistry
