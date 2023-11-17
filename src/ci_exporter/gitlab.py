@@ -13,6 +13,7 @@ from prometheus_client import (
     generate_latest,
     start_http_server,
     Gauge,
+    Histogram,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import typer
@@ -35,24 +36,36 @@ class GitlabUpdater(Updater):
             registry=self.registry,
         )
 
-        self.job_latency = Gauge(
+        self.job_latency = Histogram(
             name="gitlab_ci_job_latency",
             documentation="Time of most recent finished job spent in queue",
             registry=self.registry,
+            buckets=(
+                0,
+                1,
+                5,
+                10,
+                60,
+                5 * 60,
+                15 * 60,
+                30 * 60,
+                60 * 60,
+                2 * 60 * 60,
+                3 * 60 * 60,
+                float("inf"),
+            ),
         )
 
     def _adapt(self, jobs, project):
         for i, job in enumerate(jobs):
-            row = {
-                "commit_sha": job["commit"]["id"],
-                "project": project
-            }
+            row = {"commit_sha": job["commit"]["id"], "project": project}
 
             for k in [
                 "id",
                 "name",
                 "ref",
                 "status",
+                "queued_duration",
             ]:
                 row[k] = job[k]
 
@@ -76,17 +89,38 @@ class GitlabUpdater(Updater):
                 requester="ci_exporter",
                 access_token=self._token,
             )
+
+            # get jobs we did not have queued duration for
+            queued = [
+                q.id
+                for q in Job.select(Job.id)
+                .where(Job.queued_duration.is_null())
+                .execute()
+            ]
+
             for project in projects:
                 jobs = gl.getiter(
                     f"/projects/{project.replace('/', '%2F')}/jobs?per_page=250&order_by=id&sort=desc"
                 )
 
                 g = self._adapt(
-                    [j async for _, j in asyncstdlib.zip(range(1000), jobs)],
-                    project
+                    [j async for _, j in asyncstdlib.zip(range(1000), jobs)], project
                 )
-
                 Job.insert_many(g).on_conflict_replace().execute()
+
+            # update latency
+            queued_updated = list(
+                Job.select(Job.queued_duration)
+                .where(
+                    Job.id.in_(queued),
+                )
+                .execute()
+            )
+
+            for j in queued_updated:
+                if j.queued_duration is None:
+                    continue
+                self.job_latency.observe(j.queued_duration)
 
             self.job_count.clear()
             for job in Job.select(
@@ -95,16 +129,6 @@ class GitlabUpdater(Updater):
                 self.job_count.labels(status=job.status, job_name=job.name).inc(
                     job.count
                 )
-
-            latest = (
-                Job.select()
-                .where(Job.finished_at is not None)
-                .order_by(Job.finished_at.desc())
-                .get()
-            )
-            if latest is not None:
-                queued_duration = latest.started_at - latest.created_at
-                self.job_latency.set(queued_duration.total_seconds())
 
 
 cli = typer.Typer()

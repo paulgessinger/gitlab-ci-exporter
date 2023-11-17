@@ -41,7 +41,7 @@ class GithubUpdater(Updater):
         )
 
     @staticmethod
-    def _map_status_conclusion(status:str, conclusion:str)-> Status:
+    def _map_status_conclusion(status: str, conclusion: str) -> Status:
         if status == "queued":
             return Status.pending
         elif status == "in_progress":
@@ -60,7 +60,6 @@ class GithubUpdater(Updater):
         else:
             raise ValueError(f"Invalid status {status}")
 
-
     async def tick(self, projects: List[str]):
         async with aiohttp.ClientSession() as session:
             gh = GitHubAPI(session, requester="ci_exporter", oauth_token=self._token)
@@ -71,32 +70,41 @@ class GithubUpdater(Updater):
                     iterable_key="workflow_runs",
                 )
 
-
                 runs = [r async for r in runs]
+
                 async def get_jobs(url):
                     return [j async for j in gh.getiter(url, iterable_key="jobs")]
-
 
                 for outer_chunk in more_itertools.chunked(runs, 100):
                     batch = []
                     for chunk in more_itertools.chunked(outer_chunk, 10):
-                        chunk_jobs = await asyncio.gather(*[get_jobs(r["jobs_url"]) for r in chunk])
+                        chunk_jobs = await asyncio.gather(
+                            *[get_jobs(r["jobs_url"]) for r in chunk]
+                        )
 
                         datefmt = "%Y-%m-%dT%H:%M:%SZ"
-                        parse = lambda d: datetime.strptime(d, datefmt) if d is not None else None
+                        parse = (
+                            lambda d: datetime.strptime(d, datefmt)
+                            if d is not None
+                            else None
+                        )
                         for run, jobs in zip(chunk, chunk_jobs):
                             for job in jobs:
-                                batch.append({
-                                    "id": job["id"],
-                                    "project": project,
-                                    "commit_sha": job["head_sha"],
-                                    "name": f"{run['name']} / {job['name']}",
-                                    "ref": run["head_branch"],
-                                    "status": self._map_status_conclusion(job["status"], job["conclusion"]).name,
-                                    "created_at": parse(job["created_at"]),
-                                    "started_at": parse(job["started_at"]),
-                                    "finished_at": parse(job["completed_at"]),
-                                })
+                                batch.append(
+                                    {
+                                        "id": job["id"],
+                                        "project": project,
+                                        "commit_sha": job["head_sha"],
+                                        "name": f"{run['name']} / {job['name']}",
+                                        "ref": run["head_branch"],
+                                        "status": self._map_status_conclusion(
+                                            job["status"], job["conclusion"]
+                                        ).name,
+                                        "created_at": parse(job["created_at"]),
+                                        "started_at": parse(job["started_at"]),
+                                        "finished_at": parse(job["completed_at"]),
+                                    }
+                                )
                     Job.insert_many(batch).on_conflict_replace().execute()
 
             self.job_count.clear()
