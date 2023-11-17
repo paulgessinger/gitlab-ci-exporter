@@ -9,6 +9,7 @@ from prometheus_client import (
     generate_latest,
     start_http_server,
     Gauge,
+    Histogram,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import aiohttp
@@ -18,6 +19,7 @@ import typer
 import more_itertools
 import peewee
 
+from . import LATENCY_BUCKETS
 from .update import Updater
 from .db import Job, prepare_database, Status
 
@@ -34,10 +36,11 @@ class GithubUpdater(Updater):
             registry=self.registry,
         )
 
-        self.job_latency = Gauge(
+        self.job_latency = Histogram(
             name="github_ci_job_latency",
             documentation="Time of most recent finished job spent in queue",
             registry=self.registry,
+            buckets=LATENCY_BUCKETS,
         )
 
     @staticmethod
@@ -123,7 +126,7 @@ class GithubUpdater(Updater):
             )
             if latest is not None:
                 queued_duration = latest.started_at - latest.created_at
-                self.job_latency.set(queued_duration.total_seconds())
+                self.job_latency.observe(queued_duration.total_seconds())
 
 
 cli = typer.Typer()

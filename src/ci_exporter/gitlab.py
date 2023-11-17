@@ -19,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import typer
 import asyncstdlib
 
+from . import LATENCY_BUCKETS
 from .db import Job, prepare_database
 from .update import Updater
 
@@ -40,20 +41,7 @@ class GitlabUpdater(Updater):
             name="gitlab_ci_job_latency",
             documentation="Time of most recent finished job spent in queue",
             registry=self.registry,
-            buckets=(
-                0,
-                1,
-                5,
-                10,
-                60,
-                5 * 60,
-                15 * 60,
-                30 * 60,
-                60 * 60,
-                2 * 60 * 60,
-                3 * 60 * 60,
-                float("inf"),
-            ),
+            buckets=LATENCY_BUCKETS,
         )
 
     def _adapt(self, jobs, project):
