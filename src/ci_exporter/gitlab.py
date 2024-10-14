@@ -33,7 +33,7 @@ class GitlabUpdater(Updater):
         self.job_count = Gauge(
             name="gitlab_ci_job_count",
             documentation="The total number of jobs running for various categories",
-            labelnames=["status", "job_name"],
+            labelnames=["status", "job_name", "project"],
             registry=self.registry,
         )
 
@@ -112,11 +112,12 @@ class GitlabUpdater(Updater):
 
             self.job_count.clear()
             for job in Job.select(
-                peewee.fn.COUNT().alias("count"), Job.name, Job.status
-            ).group_by(Job.name, Job.status):
-                self.job_count.labels(status=job.status, job_name=job.name).inc(
-                    job.count
-                )
+                peewee.fn.COUNT().alias("count"), Job.name, Job.status, Job.project
+            ).group_by(Job.name, Job.status, Job.project):
+                print(job)
+                self.job_count.labels(
+                    status=job.status, job_name=job.name, project=job.project
+                ).inc(job.count)
 
 
 cli = typer.Typer()
