@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 from pathlib import Path
 import tempfile
+import contextlib
 
 from prometheus_client import (
     CollectorRegistry,
@@ -14,7 +15,6 @@ from prometheus_client import (
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import aiohttp
 from gidgethub.aiohttp import GitHubAPI
-import asyncstdlib
 import typer
 import more_itertools
 import peewee
@@ -38,7 +38,16 @@ class GithubUpdater(Updater):
 
         self.job_latency = Histogram(
             name="github_ci_job_latency",
-            documentation="Time of most recent finished job spent in queue",
+            documentation="Time that jobs spent in the queue",
+            labelnames=["status", "job_name"],
+            registry=self.registry,
+            buckets=LATENCY_BUCKETS,
+        )
+
+        self.job_duration = Histogram(
+            name="github_ci_job_duration",
+            documentation="Time jobs took to execute",
+            labelnames=["status", "job_name"],
             registry=self.registry,
             buckets=LATENCY_BUCKETS,
         )
@@ -86,11 +95,12 @@ class GithubUpdater(Updater):
                         )
 
                         datefmt = "%Y-%m-%dT%H:%M:%SZ"
-                        parse = (
-                            lambda d: datetime.strptime(d, datefmt)
-                            if d is not None
-                            else None
-                        )
+
+                        def parse(d):
+                            return (
+                                datetime.strptime(d, datefmt) if d is not None else None
+                            )
+
                         for run, jobs in zip(chunk, chunk_jobs):
                             for job in jobs:
                                 batch.append(
@@ -118,15 +128,29 @@ class GithubUpdater(Updater):
                     job.count
                 )
 
-            latest = (
-                Job.select()
-                .where(Job.finished_at is not None)
-                .order_by(Job.finished_at.desc())
-                .get()
-            )
-            if latest is not None:
-                queued_duration = latest.started_at - latest.created_at
-                self.job_latency.observe(queued_duration.total_seconds())
+            self.job_latency.clear()
+            self.job_duration.clear()
+            for job in Job.select(
+                Job.name, Job.status, Job.finished_at, Job.created_at, Job.started_at
+            ).where(Job.started_at.is_null(False)):
+                self.job_latency.labels(status=job.status, job_name=job.name).observe(
+                    (job.started_at - job.created_at).total_seconds()
+                )
+
+                if job.finished_at is not None:
+                    self.job_duration.labels(
+                        status=job.status, job_name=job.name
+                    ).observe((job.finished_at - job.started_at).total_seconds())
+
+            # latest = (
+            #     Job.select()
+            #     .where(Job.finished_at is not None)
+            #     .order_by(Job.finished_at.desc())
+            #     .get()
+            # )
+            # if latest is not None:
+            #     queued_duration = latest.started_at - latest.created_at
+            #     self.job_latency.observe(queued_duration.total_seconds())
 
 
 cli = typer.Typer()
@@ -168,7 +192,10 @@ def tick(
 
     with context() as t:
         assert t is not None or dbfile is not None
-        prepare_database(dbfile or Path(t.name))
+        if t is not None:
+            prepare_database(Path(t.name))
+        elif dbfile is not None:
+            prepare_database(dbfile)
         updater = GithubUpdater(token=token)
         asyncio.run(updater.tick(projects))
 

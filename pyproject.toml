@@ -45,6 +45,10 @@ ci-exporter = 'ci_exporter.cli:cli'
 # [build-system]
 # requires = ["poetry-core>=1.0.0"]
 # build-backend = "poetry.core.masonry.api"
+[tool.pyright]
+exclude = [ ".venv" ]
+venvPath = "."
+venv = ".venv"
 
 [build-system]
 requires = ["hatchling"]
