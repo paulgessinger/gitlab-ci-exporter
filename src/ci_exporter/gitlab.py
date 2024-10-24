@@ -97,17 +97,19 @@ class GitlabUpdater(Updater):
                 )
                 Job.insert_many(g).on_conflict_replace().execute()
 
+            jobs = list(
+                Job.select(
+                    peewee.fn.COUNT().alias("count"), Job.name, Job.status, Job.project
+                ).group_by(Job.name, Job.status, Job.project)
+            )
             self.job_count.clear()
-            for job in Job.select(
-                peewee.fn.COUNT().alias("count"), Job.name, Job.status, Job.project
-            ).group_by(Job.name, Job.status, Job.project):
+            for job in jobs:
                 print(job)
                 self.job_count.labels(
                     status=job.status, job_name=job.name, project=job.project
                 ).inc(job.count)
 
-            self.job_latency.clear()
-            self.job_duration.clear()
+            jobs = []
             for job in Job.select(
                 Job.name,
                 Job.status,
@@ -116,14 +118,31 @@ class GitlabUpdater(Updater):
                 Job.started_at,
                 Job.project,
             ).where(Job.started_at.is_null(False)):
-                self.job_latency.labels(
-                    status=job.status, job_name=job.name, project=job.project
-                ).observe((job.started_at - job.created_at).total_seconds())
+                jobs.append(
+                    (
+                        job.status,
+                        job.name,
+                        job.project,
+                        (job.started_at - job.created_at).total_seconds(),
+                        (
+                            (job.finished_at - job.started_at).total_seconds()
+                            if job.finished_at is not None
+                            else None
+                        ),
+                    )
+                )
 
-                if job.finished_at is not None:
+            self.job_latency.clear()
+            self.job_duration.clear()
+            for status, name, project, latency, duration in jobs:
+                self.job_latency.labels(
+                    status=status, job_name=name, project=project
+                ).observe(latency)
+
+                if duration is not None:
                     self.job_duration.labels(
-                        status=job.status, job_name=job.name, project=job.project
-                    ).observe((job.finished_at - job.started_at).total_seconds())
+                        status=status, job_name=name, project=project
+                    ).observe(duration)
 
 
 cli = typer.Typer()
